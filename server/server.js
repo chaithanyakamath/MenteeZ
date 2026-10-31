@@ -41,12 +41,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'mentee_super_secret_jwt_key_2026';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const IS_SERVERLESS = Boolean(process.env.VERCEL);
 
-// Initial DB connection for non-serverless long-running processes
-if (!IS_SERVERLESS) {
-  connectDB().catch((err) => {
-    console.warn(` Initial MongoDB connection warning: ${err.message}`);
-  });
-}
+// Initial DB connection
+connectDB().catch((err) => {
+  console.warn(` Initial MongoDB connection warning: ${err.message}`);
+});
 
 // Setup uploads directory with fallback to /tmp in serverless environments
 const UPLOADS_DIR = IS_SERVERLESS
@@ -2318,23 +2316,21 @@ app.delete('/api/users/:id', protect, authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// Start Server with fallback handling (only for standalone/non-serverless instances)
-if (!IS_SERVERLESS) {
-  const server = app.listen(PORT, () => {
-    console.log(`⚡ MEntee Institutional API Server running on port ${PORT}`);
-  });
+// Start Server listener
+const server = app.listen(PORT, () => {
+  console.log(`⚡ MEntee Institutional API Server running on port ${PORT}`);
+});
 
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      const fallbackPort = Number(PORT) + 1;
-      console.warn(`Port ${PORT} in use, retrying on port ${fallbackPort}...`);
-      app.listen(fallbackPort, () => {
-        console.log(`⚡ MEntee Institutional API Server running on port ${fallbackPort}`);
-      });
-    } else {
-      console.error(err);
-    }
-  });
-}
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    const fallbackPort = Number(PORT) + 1;
+    console.warn(`Port ${PORT} in use, retrying on port ${fallbackPort}...`);
+    app.listen(fallbackPort, () => {
+      console.log(`⚡ MEntee Institutional API Server running on port ${fallbackPort}`);
+    });
+  } else {
+    console.error(err);
+  }
+});
 
 export default app;
