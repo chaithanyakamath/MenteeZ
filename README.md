@@ -155,3 +155,53 @@ node test_security_and_workflows.js
 4. **Document Approval Workflow**: Review queue, approval state transition, rejection with mandatory reason, notification dispatch.
 5. **Mentoring Appointments**: Meeting creation, student visibility, rescheduling, completion with discussion notes and action items, unassigned mentor rejection.
 6. **360° Profiles & Document Requests**: Mentee dropdown population, HOD mentor profile with department scope guard, assigned mentor mentee profile access, unassigned mentor rejection (403), document upload against request with status transitions (`UNDER REVIEW` → `APPROVED` / `REJECTED`), and mandatory rejection reason validation.
+
+---
+
+## ⚡ Deployment to Vercel (Production Cloud Guide)
+
+This repository is pre-configured for **1-click unified deployment on Vercel** (Vite SPA frontend + Serverless Express backend with zero CORS friction).
+
+### Step 1: Set Up Cloud MongoDB (Atlas Free Tier)
+1. Go to [MongoDB Atlas](https://www.mongodb.com/atlas/database) and sign in (or create a free account).
+2. Create a **Free Shared Cluster (M0)**.
+3. Under **Database Access**, create a database user (e.g., username `mentee_admin`, password `YourSecurePassword123`).
+4. Under **Network Access**, click **Add IP Address** and select **Allow Access from Anywhere (`0.0.0.0/0`)** — required so Vercel's dynamic serverless lambdas can connect without timeouts.
+5. In your cluster dashboard, click **Connect** → **Drivers** (Node.js) and copy the connection string:
+   ```text
+   mongodb+srv://mentee_admin:YourSecurePassword123@cluster0.xxxxx.mongodb.net/mentee_db?retryWrites=true&w=majority
+   ```
+
+### Step 2: Sync or Seed Your Database
+You can populate your Atlas database with either your existing local data or preconfigured demo accounts:
+
+- **Option A — Copy existing local MongoDB data to Atlas**:
+  ```bash
+  node server/migrate-local-to-atlas.js "mongodb+srv://mentee_admin:YourSecurePassword123@cluster0.xxxxx.mongodb.net/mentee_db?retryWrites=true&w=majority"
+  ```
+- **Option B — Seed fresh demo accounts into Atlas**:
+  ```bash
+  node server/seed.js "mongodb+srv://mentee_admin:YourSecurePassword123@cluster0.xxxxx.mongodb.net/mentee_db?retryWrites=true&w=majority"
+  ```
+  *(Default password for seeded accounts is `Password@123`)*
+
+### Step 3: Push Changes to GitHub
+```bash
+git add .
+git commit -m "Configure high-performance Vercel serverless deployment"
+git push origin main
+```
+
+### Step 4: Deploy on Vercel
+1. Log in to [Vercel](https://vercel.com) and click **Add New...** → **Project**.
+2. Select your GitHub repository (`Mentee`).
+3. Vercel automatically detects the configuration from [`vercel.json`](vercel.json):
+   - **Framework Preset**: Other / Vite
+   - **Root Directory**: `./` (leave default)
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `client/dist`
+4. Expand **Environment Variables** and add:
+   - `MONGODB_URI`: `mongodb+srv://mentee_admin:YourSecurePassword123@cluster0.xxxxx.mongodb.net/mentee_db?retryWrites=true&w=majority`
+   - `JWT_SECRET`: `any_long_random_secret_string_for_tokens`
+   - `NODE_ENV`: `production`
+5. Click **Deploy**. Your app will build and go live in ~30 seconds!

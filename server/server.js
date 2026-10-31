@@ -29,6 +29,7 @@ import { Document } from './models/Document.js';
 import { DocumentRequest } from './models/DocumentRequest.js';
 import { Assignment } from './models/Assignment.js';
 import { protect, authorize } from './middleware/auth.js';
+import { connectDB } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,19 +39,26 @@ const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/mentee_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'mentee_super_secret_jwt_key_2026';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_SERVERLESS = Boolean(process.env.VERCEL);
 
-// Connect to MongoDB
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => console.log(` Connected to MongoDB: ${MONGODB_URI}`))
-  .catch((err) => {
-    console.error(`❌ MongoDB connection error:`, err);
+// Initial DB connection for non-serverless long-running processes
+if (!IS_SERVERLESS) {
+  connectDB().catch((err) => {
+    console.warn(` Initial MongoDB connection warning: ${err.message}`);
   });
+}
 
-// Setup uploads directory for local fallback
-const UPLOADS_DIR = path.join(__dirname, 'uploads', 'documents');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// Setup uploads directory with fallback to /tmp in serverless environments
+const UPLOADS_DIR = IS_SERVERLESS
+  ? path.join('/tmp', 'uploads', 'documents')
+  : path.join(__dirname, 'uploads', 'documents');
+
+try {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+} catch (dirErr) {
+  console.warn(`⚠️ Warning: could not initialize local uploads directory: ${dirErr.message}`);
 }
 
 // Configure Cloudinary if credentials provided
@@ -106,7 +114,6 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
 });
 
-// Middleware configuration
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
 const allowedOrigins = [
@@ -120,10 +127,19 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
+      // Allow requests with no origin (e.g. server-to-server or mobile apps)
+      if (!origin) return callback(null, true);
+
+      // Allow matching origins or any vercel.app preview URL
+      const isAllowed =
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        !IS_PRODUCTION;
+
+      if (isAllowed) {
+        callback(null, origin);
       } else {
-        callback(null, true);
+        callback(null, origin);
       }
     },
     credentials: true,
@@ -135,8 +151,34 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
+// Fast Health Check Endpoint (doesn't block on DB)
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    environment: process.env.NODE_ENV || 'development',
+    serverless: IS_SERVERLESS,
+    dbReadyState: mongoose.connection.readyState,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Serverless-ready Database Connection Middleware
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (dbErr) {
+    console.error('❌ Database connection middleware error:', dbErr.message);
+    res.status(503).json({
+      success: false,
+      error: 'Database connection error. Please verify MONGODB_URI in your environment configuration.'
+    });
+  }
+});
+
 // Token & Cookie Helpers
 const COOKIE_NAME = 'token';
+const isProductionLike = IS_PRODUCTION || IS_SERVERLESS;
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -149,8 +191,8 @@ const generateToken = (user) => {
 const setAuthCookie = (res, token) => {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: IS_PRODUCTION,
-    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    secure: isProductionLike,
+    sameSite: isProductionLike ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/'
   });
@@ -159,8 +201,8 @@ const setAuthCookie = (res, token) => {
 const clearAuthCookie = (res) => {
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
-    secure: IS_PRODUCTION,
-    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    secure: isProductionLike,
+    sameSite: isProductionLike ? 'none' : 'lax',
     path: '/'
   });
 };
@@ -2276,19 +2318,23 @@ app.delete('/api/users/:id', protect, authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// Start Server with fallback handling
-const server = app.listen(PORT, () => {
-  console.log(`⚡ MEntee Institutional API Server running on port ${PORT}`);
-});
+// Start Server with fallback handling (only for standalone/non-serverless instances)
+if (!IS_SERVERLESS) {
+  const server = app.listen(PORT, () => {
+    console.log(`⚡ MEntee Institutional API Server running on port ${PORT}`);
+  });
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    const fallbackPort = Number(PORT) + 1;
-    console.warn(`Port ${PORT} in use, retrying on port ${fallbackPort}...`);
-    app.listen(fallbackPort, () => {
-      console.log(`⚡ MEntee Institutional API Server running on port ${fallbackPort}`);
-    });
-  } else {
-    console.error(err);
-  }
-});
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      const fallbackPort = Number(PORT) + 1;
+      console.warn(`Port ${PORT} in use, retrying on port ${fallbackPort}...`);
+      app.listen(fallbackPort, () => {
+        console.log(`⚡ MEntee Institutional API Server running on port ${fallbackPort}`);
+      });
+    } else {
+      console.error(err);
+    }
+  });
+}
+
+export default app;

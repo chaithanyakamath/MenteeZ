@@ -4,7 +4,8 @@
  * No JWTs, passwords, or authentication secrets are stored in Local Storage.
  */
 
-const API_BASE = '/api';
+const RAW_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_BASE = RAW_BASE ? (RAW_BASE.endsWith('/api') ? RAW_BASE : `${RAW_BASE}/api`) : '/api';
 
 const defaultFetchOptions = {
   credentials: 'include'
